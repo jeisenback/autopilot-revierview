@@ -1,0 +1,5 @@
+.env
+channels/**/.env
+channels/**/.data/
+*.log
+node_modules/

@@ -1,0 +1,11 @@
+{
+  "name": "webhook-channel",
+  "version": "0.0.1",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.mjs"
+  }
+}
