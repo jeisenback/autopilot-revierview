@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import * as orchestrator from '../../orchestrator/index.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,13 +34,6 @@ loadEnv(path.resolve(SCRIPT_DIR, '..', '..', '.env'));
 loadEnv(path.resolve(SCRIPT_DIR, '.env'));
 
 const PORT = Number(process.env.PORT || 8910);
-const AUTO_REPLY = /^(1|true|on|yes)$/i.test(process.env.WEBHOOK_AUTO_REPLY || 'false');
-const ANTHROPIC_API_KEY = (process.env.ANTHROPIC_API_KEY || '').trim();
-const MODEL_ID = (process.env.DISCORD_RESPONDER_MODEL || 'claude-sonnet-4-6').trim();
-const SYSTEM_PROMPT = (
-  process.env.DISCORD_RESPONDER_SYSTEM_PROMPT ||
-  'You are an assistant for the autopilot-riverview project. Answer directly, briefly, and helpfully.'
-).trim();
 const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS || 60000);
 
 function json(res, status, body) {
@@ -71,36 +65,6 @@ async function postJson(url, body) {
   }
 }
 
-async function generateReply(body) {
-  if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not set');
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: MODEL_ID,
-        max_tokens: 1024,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: body.content || '(empty message)' }]
-      }),
-      signal: controller.signal
-    });
-
-    if (!res.ok) throw new Error(`Anthropic API error: ${res.status}`);
-    const data = await res.json();
-    return data.content?.[0]?.text?.trim() || '(no response)';
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
@@ -125,22 +89,29 @@ const server = http.createServer(async (req, res) => {
       });
       process.stdout.write(`${line}\n`);
 
+      // Ack immediately — do NOT await orchestrator (blocks new requests while Claude runs)
       json(res, 200, { ok: true, receivedAt: stamp });
 
-      // Auto-reply via callback if enabled
-      if (AUTO_REPLY && body.callbackUrl && body.requestId) {
-        generateReply(body)
-          .then(replyText =>
-            postJson(body.callbackUrl, { requestId: body.requestId, response: replyText })
-          )
-          .catch(async err => {
-            process.stderr.write(`auto-reply failed: ${err}\n`);
-            await postJson(body.callbackUrl, {
-              requestId: body.requestId,
-              response: `Error: ${err.message || err}`
-            }).catch(() => {});
+      if (body.callbackUrl && body.requestId) {
+        orchestrator.handle(body)
+          .then(text => postJson(body.callbackUrl, { requestId: body.requestId, response: text }))
+          .catch(err => {
+            process.stderr.write(`orchestrator error: ${err}\n`);
+            return postJson(body.callbackUrl, { requestId: body.requestId, response: `Error: ${err.message}` });
           });
       }
+    } catch (err) {
+      json(res, 400, { ok: false, error: String(err) });
+    }
+    return;
+  }
+
+  // HA webhook — auth and full handling in issue #13
+  if (req.method === 'POST' && req.url === '/ha-events') {
+    try {
+      const body = await readBody(req);
+      process.stdout.write(`${JSON.stringify({ ts: new Date().toISOString(), source: 'ha', payload: body })}\n`);
+      json(res, 200, { ok: true });
     } catch (err) {
       json(res, 400, { ok: false, error: String(err) });
     }
