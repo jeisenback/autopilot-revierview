@@ -1,0 +1,18 @@
+{
+  "name": "autopilot-riverview",
+  "version": "0.0.1",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node channels/webhook/index.mjs",
+    "test": "node --test test/**/*.test.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "better-sqlite3": "^12.8.0",
+    "dotenv": "^17.4.0",
+    "node-cron": "^4.2.1"
+  }
+}

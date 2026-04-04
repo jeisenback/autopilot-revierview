@@ -3,3 +3,4 @@ channels/**/.env
 channels/**/.data/
 *.log
 node_modules/
+db/*.db
