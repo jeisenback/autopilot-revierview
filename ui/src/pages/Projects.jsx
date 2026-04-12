@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { DndContext, closestCorners } from '@dnd-kit/core'
+import { DndContext, closestCorners, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core'
 import { useDroppable, useDraggable } from '@dnd-kit/core'
 import { useProjects, useUpdateProjectStatus, useCreateProject } from '@/hooks/useProjects'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -109,6 +109,10 @@ export default function Projects() {
   const { data: projects = [], isLoading, error } = useProjects()
   const updateStatus = useUpdateProjectStatus()
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 10 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  )
 
   if (isLoading) return <div className="text-muted-foreground text-sm">Loading…</div>
   if (error) return <div className="text-destructive text-sm">Failed to load projects: {error.message}</div>
@@ -130,7 +134,7 @@ export default function Projects() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">Projects</h1>
       </div>
-      <DndContext collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
         <div className="flex gap-4 overflow-x-auto pb-4">
           {STATUSES.map(status => (
             <KanbanColumn key={status} status={status} projects={byStatus[status]}>
