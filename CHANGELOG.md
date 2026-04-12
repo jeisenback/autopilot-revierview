@@ -3,6 +3,23 @@
 All notable changes to autopilot-riverview are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.0.0] - 2026-04-12
+
+### Added
+- **`template_items.requires_space_ready`** — nullable FK column linking a checklist item
+  to a space that must be ready before departure (#43)
+- **Departure blockers in daily digest** — `buildDigest` now queries today's pending template
+  runs; if any item's required space is not ready, a `⚠️ Departure blocked` section appears
+  in the formatted output. Adults see all blocked runs; kids see only runs they own (#44)
+- **Completion broadcasts** — after `complete()` marks a task done, any tasks that are
+  now fully unblocked (all dependencies done/skipped) have their assignees DM'd
+  `"[task] is now unblocked — ready to start."` (fire-and-forget, per-task error isolation) (#45)
+- 11 new tests (schema ×3, briefingEngine ×5, projectManager ×4 — 262 total suite-wide)
+
+### Fixed
+- `complete()` unblock query: previously set dependents to `todo` even when they had
+  other remaining blockers; now only unblocks when ALL dependencies are done/skipped
+
 ## [0.4.0.0] - 2026-04-12
 
 ### Added
