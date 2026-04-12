@@ -1,10 +1,10 @@
 // Cron job registration — approval expiry and daily notification reset.
-// See: GitHub issue #11
+// See: GitHub issues #11, #33
 // Call registerAll(cron, db) once at process start from the webhook server.
 
 import db_singleton from '../db/db.mjs';
 import { expireStale } from './approvalManager.mjs';
-import { registerCron as registerBriefingCron } from './briefingEngine.mjs';
+import { registerCron as registerBriefingCron, sendAllDigests } from './briefingEngine.mjs';
 import { scheduleTomorrow, sendDepartureReminders } from './templateEngine.mjs';
 
 // resetDailyCounts: exported for direct testing without cron machinery.
@@ -18,6 +18,15 @@ export function resetDailyCounts(db = db_singleton) {
 export function registerAll(cron, db = db_singleton) {
   // Morning briefing — 8am daily (configurable via BRIEFING_CRON)
   registerBriefingCron(cron);
+
+  // Per-person daily digest — 7:30am daily (configurable via DIGEST_CRON)
+  const digestSchedule = process.env.DIGEST_CRON || '30 7 * * *';
+  cron.schedule(digestSchedule, () => {
+    const today = new Date().toISOString().split('T')[0];
+    sendAllDigests(today).catch(err => {
+      process.stderr.write(`cron: sendAllDigests failed: ${err.message}\n`);
+    });
+  });
 
   // Approval expiry — every hour
   cron.schedule('0 * * * *', () => {
