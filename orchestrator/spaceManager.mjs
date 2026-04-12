@@ -29,6 +29,14 @@ export function createSpaceManager({ db = db_singleton } = {}) {
     SELECT * FROM space_items WHERE space_id = ? ORDER BY id
   `);
 
+  const selectNotReady = db.prepare(`
+    SELECT s.*, m.name AS assigned_to_name
+    FROM spaces s
+    LEFT JOIN members m ON m.id = s.assigned_to
+    WHERE s.is_ready = 0
+    ORDER BY s.name
+  `);
+
   const insertTask = db.prepare(`
     INSERT INTO tasks (project_id, title, description, status, assigned_to, created_from)
     VALUES (@project_id, @title, @description, 'todo', @assigned_to, 'manual')
@@ -89,13 +97,7 @@ export function createSpaceManager({ db = db_singleton } = {}) {
   // Returns all spaces where is_ready = 0. Used by briefingEngine.
 
   function getNotReady() {
-    return db.prepare(`
-      SELECT s.*, m.name AS assigned_to_name
-      FROM spaces s
-      LEFT JOIN members m ON m.id = s.assigned_to
-      WHERE s.is_ready = 0
-      ORDER BY s.name
-    `).all();
+    return selectNotReady.all();
   }
 
   // ─── getBlockingSpaces ────────────────────────────────────────────────────
