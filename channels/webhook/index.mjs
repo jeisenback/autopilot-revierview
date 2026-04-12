@@ -38,6 +38,7 @@ loadEnv(path.resolve(SCRIPT_DIR, '.env'));
 
 const PORT = Number(process.env.PORT || 8910);
 const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS || 60000);
+const AUTO_REPLY = process.env.WEBHOOK_AUTO_REPLY === 'true';
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
