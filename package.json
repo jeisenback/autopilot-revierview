@@ -7,7 +7,8 @@
   },
   "scripts": {
     "start": "node channels/webhook/index.mjs",
-    "test": "node --test test/**/*.test.mjs"
+    "test": "node --test test/**/*.test.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
@@ -16,5 +17,8 @@
     "dotenv": "^17.4.0",
     "googleapis": "^171.4.0",
     "node-cron": "^4.2.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
   }
 }
