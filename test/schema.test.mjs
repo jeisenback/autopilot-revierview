@@ -136,3 +136,35 @@ test('schema: tasks.google_task_id is nullable', () => {
   const row = db.prepare(`SELECT google_task_id FROM tasks`).get();
   assert.equal(row.google_task_id, null);
 });
+
+// ─── template_items.requires_space_ready ──────────────────────────────────────
+
+test('schema: template_items has requires_space_ready column', () => {
+  const db = makeDb();
+  assert.ok(cols(db, 'template_items').includes('requires_space_ready'));
+});
+
+test('schema: template_items.requires_space_ready defaults to null', () => {
+  const db = makeDb();
+  const templateId = db.prepare(
+    `INSERT INTO process_templates (title, recurrence) VALUES ('Morning', 'daily')`
+  ).run().lastInsertRowid;
+  db.prepare(`INSERT INTO template_items (template_id, label) VALUES (?, 'Pack bag')`).run(templateId);
+  const row = db.prepare(`SELECT requires_space_ready FROM template_items`).get();
+  assert.equal(row.requires_space_ready, null);
+});
+
+test('schema: template_items.requires_space_ready FK references spaces', () => {
+  const db = makeDb();
+  const spaceId = db.prepare(
+    `INSERT INTO spaces (name, ready_state) VALUES ('Mudroom', 'hooks clear')`
+  ).run().lastInsertRowid;
+  const templateId = db.prepare(
+    `INSERT INTO process_templates (title, recurrence) VALUES ('School run', 'daily')`
+  ).run().lastInsertRowid;
+  assert.doesNotThrow(() => {
+    db.prepare(
+      `INSERT INTO template_items (template_id, label, requires_space_ready) VALUES (?, 'Leave', ?)`
+    ).run(templateId, spaceId);
+  });
+});
