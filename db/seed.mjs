@@ -88,7 +88,57 @@ async function main() {
     }
   }
 
+  seedSpaces();
+
   rl.close();
+}
+
+// ─── Sample spaces ────────────────────────────────────────────────────────────
+
+const SAMPLE_SPACES = [
+  {
+    name: 'Mudroom',
+    location: 'entryway',
+    ready_state: 'shoes on rack, bag hooks clear, keys on hook',
+  },
+  {
+    name: 'Kitchen Counter',
+    location: 'kitchen',
+    ready_state: 'clear of dishes, no mail pile, surfaces wiped',
+  },
+  {
+    name: 'Master Closet',
+    location: 'master bedroom',
+    ready_state: 'floor clear, clothes hung or in hamper, no pile on chair',
+  },
+  {
+    name: "Kids' Backpack Zone",
+    location: 'hallway',
+    ready_state: 'backpacks hung on hooks, shoes in cubby, no gear on floor',
+  },
+];
+
+const findSpace = db.prepare(`SELECT id FROM spaces WHERE name = ?`);
+const insertSpace = db.prepare(`
+  INSERT INTO spaces (name, location, ready_state, is_ready)
+  VALUES (@name, @location, @ready_state, 1)
+`);
+
+function seedSpaces() {
+  console.log('\n── Spaces ───────────────────────────────');
+  let added = 0;
+  let skipped = 0;
+  for (const space of SAMPLE_SPACES) {
+    if (findSpace.get(space.name)) {
+      console.log(`  Skipped — "${space.name}" already exists.`);
+      skipped++;
+    } else {
+      const { lastInsertRowid } = insertSpace.run(space);
+      console.log(`  ✓ Added "${space.name}" (id=${lastInsertRowid})`);
+      added++;
+    }
+  }
+  console.log(`  ${added} added, ${skipped} skipped.`);
 }
 
 main().catch(err => {
