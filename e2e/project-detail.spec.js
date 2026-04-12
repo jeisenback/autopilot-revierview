@@ -47,7 +47,7 @@ test.describe('Project detail page', () => {
     const taskName = `Task ${Date.now()}`;
     // Fill task title — first textbox in dialog
     await page.getByRole('dialog').getByRole('textbox').first().fill(taskName);
-    await page.getByRole('dialog').getByRole('button', { name: /^Add$|^Create$|^Save$/i }).click();
+    await page.getByRole('dialog').getByRole('button', { name: /Add task/i }).click();
     await expect(page.getByText(taskName)).toBeVisible({ timeout: 5000 });
   });
 
