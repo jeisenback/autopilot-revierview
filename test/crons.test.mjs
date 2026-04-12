@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createApprovalManager } from '../orchestrator/approvalManager.mjs';
-import { resetDailyCounts } from '../orchestrator/crons.mjs';
+import { resetDailyCounts, registerAll } from '../orchestrator/crons.mjs';
 
 // ─── in-memory DB ─────────────────────────────────────────────────────────────
 
@@ -172,4 +172,44 @@ test('resetDailyCounts(): updates daily_reset_date to today', () => {
 test('resetDailyCounts(): no members → no-op, no error', () => {
   const db = makeDb();
   assert.doesNotThrow(() => resetDailyCounts(db));
+});
+
+// ─── registerAll() — digest cron ─────────────────────────────────────────────
+
+function makeCronSpy() {
+  const schedules = [];
+  return {
+    schedule: (expr, fn) => { schedules.push({ expr, fn }); },
+    schedules,
+  };
+}
+
+test('registerAll(): registers a cron for 7:30am digest (default schedule)', () => {
+  const cron = makeCronSpy();
+  const db = makeDb();
+  registerAll(cron, db);
+  const has730 = cron.schedules.some(s => s.expr === '30 7 * * *');
+  assert.ok(has730, 'should register 30 7 * * * digest cron');
+});
+
+test('registerAll(): DIGEST_CRON env var overrides default 7:30am schedule', () => {
+  const prev = process.env.DIGEST_CRON;
+  process.env.DIGEST_CRON = '0 6 * * *';
+  try {
+    const cron = makeCronSpy();
+    const db = makeDb();
+    registerAll(cron, db);
+    const has6am = cron.schedules.some(s => s.expr === '0 6 * * *');
+    assert.ok(has6am, 'should use DIGEST_CRON env override');
+  } finally {
+    if (prev === undefined) delete process.env.DIGEST_CRON;
+    else process.env.DIGEST_CRON = prev;
+  }
+});
+
+test('registerAll(): registers at least 5 cron schedules (briefing, digest, expiry, reset, template)', () => {
+  const cron = makeCronSpy();
+  const db = makeDb();
+  registerAll(cron, db);
+  assert.ok(cron.schedules.length >= 5, `expected >= 5 crons, got ${cron.schedules.length}`);
 });

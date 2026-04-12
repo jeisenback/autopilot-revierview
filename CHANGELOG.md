@@ -3,6 +3,18 @@
 All notable changes to autopilot-riverview are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0.0] - 2026-04-12
+
+### Added
+- **Per-person daily digest** (`briefingEngine.buildDigest`) — personalized morning briefing
+  per family member: overdue tasks, due-today tasks, up-next queue, tasks they are blocking
+  for others (via `task_dependencies`), and tasks newly unblocked for them
+- **`sendAllDigests(date)`** — sends each member's digest to their DM channel; per-member
+  errors are isolated and never crash the cron
+- **Digest formatter** — plain-text Discord output with 🔴/🟡/⚪/⛔/✅ section icons,
+  tailored greeting by member role (adult vs. kid)
+- 11 new tests for `buildDigest` and `sendAllDigests` (19 total in briefingEngine suite)
+
 ## [0.2.0.0] - 2026-04-11
 
 ### Added

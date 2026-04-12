@@ -7,3 +7,5 @@ db/*.db
 db/*.db-shm
 db/*.db-wal
 secrets.json
+.gstack/
+test-results/
