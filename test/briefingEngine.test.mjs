@@ -463,3 +463,88 @@ test('buildDigest: formatted omits spaces section when all ready', () => {
 
   assert.ok(!digest.formatted.includes('Spaces needing'), 'should not include spaces section when all ready');
 });
+
+// ─── template blockers ────────────────────────────────────────────────────────
+
+function seedTemplateRun(db, { title = 'School run', ownerId = null, spaceId = null, date = '2026-04-12', status = 'pending', departAt = '08:00' } = {}) {
+  const templateId = db.prepare(
+    `INSERT INTO process_templates (title, recurrence, owner_id, depart_time) VALUES (?, 'daily', ?, ?)`
+  ).run(title, ownerId, departAt).lastInsertRowid;
+  db.prepare(
+    `INSERT INTO template_items (template_id, label, requires_space_ready) VALUES (?, 'Leave', ?)`
+  ).run(templateId, spaceId);
+  const runId = db.prepare(
+    `INSERT INTO template_runs (template_id, scheduled_for, depart_at, status) VALUES (?, ?, ?, ?)`
+  ).run(templateId, date, departAt, status).lastInsertRowid;
+  return { templateId, runId };
+}
+
+test('buildDigest: templateBlockers includes run blocked by not-ready space (owner)', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-tb-1' });
+  const spaceId = seedSpace(db, { name: 'Mudroom', isReady: 0 });
+  seedTemplateRun(db, { title: 'School run', ownerId: alice.id, spaceId, date: '2026-04-12' });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.equal(digest.templateBlockers.length, 1);
+  assert.equal(digest.templateBlockers[0].template_title, 'School run');
+  assert.equal(digest.templateBlockers[0].space_name, 'Mudroom');
+});
+
+test('buildDigest: adult sees template blockers even if not template owner', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-tb-2' });
+  const bob = seedMember(db, { name: 'Bob', discordId: 'u-tb-2b' });
+  const spaceId = seedSpace(db, { name: 'Kitchen', isReady: 0 });
+  seedTemplateRun(db, { title: "Bob's run", ownerId: bob.id, spaceId, date: '2026-04-12' });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.equal(digest.templateBlockers.length, 1, 'adult should see all template blockers');
+});
+
+test('buildDigest: no blockers when space is ready', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-tb-3' });
+  const spaceId = seedSpace(db, { name: 'Mudroom', isReady: 1 });
+  seedTemplateRun(db, { title: 'School run', ownerId: alice.id, spaceId, date: '2026-04-12' });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.equal(digest.templateBlockers.length, 0, 'no blockers when space is ready');
+});
+
+test('buildDigest: no blockers for runs on different date', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-tb-4' });
+  const spaceId = seedSpace(db, { name: 'Mudroom', isReady: 0 });
+  seedTemplateRun(db, { title: 'School run', ownerId: alice.id, spaceId, date: '2026-04-13' });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.equal(digest.templateBlockers.length, 0, 'runs on other dates should not appear');
+});
+
+test('buildDigest: formatted includes departure-blocked section', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-tb-5' });
+  const spaceId = seedSpace(db, { name: 'Mudroom', isReady: 0 });
+  seedTemplateRun(db, { title: 'School run', ownerId: alice.id, spaceId, date: '2026-04-12', departAt: '08:00' });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.ok(digest.formatted.includes('Departure blocked'), 'formatted should include departure-blocked section');
+  assert.ok(digest.formatted.includes('School run'), 'formatted should include template title');
+  assert.ok(digest.formatted.includes('Mudroom'), 'formatted should include space name');
+});
