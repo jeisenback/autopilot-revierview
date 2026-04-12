@@ -3,6 +3,21 @@
 All notable changes to autopilot-riverview are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0.0] - 2026-04-11
+
+### Added
+- **Cron-expression recurrence** (`recurrence_cron` column on `tasks`) — arbitrary schedules
+  like `0 9 * * 1,3,5` (Mon+Wed+Fri 9am) alongside the existing `daily`/`weekly`/`monthly` enum
+- `nextDueDate(dueDate, recurrence, recurrenceCron)` exported from `projectManager.mjs`;
+  cron takes precedence over legacy enum when both are set; powered by `cron-parser` v5
+- `complete()` propagates `recurrence_cron` to the next task instance
+- **13 new tests** in `test/recurrence.test.mjs` — unit-tests `nextDueDate` and integration
+  tests `complete()` with cron + legacy recurrence (181 total, all pass)
+
+### Changed
+- Schema: `tasks.recurrence_cron TEXT` added (nullable, no migration required for existing rows)
+- `cron-parser ^5.5.0` added as dependency
+
 ## [0.1.0.0] - 2026-04-12
 
 ### Added

@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   due_date TEXT,
   priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (1,2,3)),
   recurrence TEXT CHECK(recurrence IN ('daily','weekly','monthly')),
-  -- NULL = one-time. Cron expressions not supported in v1.
+  -- NULL = one-time. For simple cadences use recurrence; for arbitrary schedules use recurrence_cron.
+  recurrence_cron TEXT,             -- cron expression, e.g. '0 9 * * 1,3' (Mon+Wed 9am)
+  -- recurrence_cron takes precedence over recurrence when both are set.
   google_calendar_event_id TEXT,    -- Calendar event ID for push/update/delete
   created_from TEXT DEFAULT 'manual'
     CHECK(created_from IN ('manual','ha_event','claude')),
