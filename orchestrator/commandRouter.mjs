@@ -1,10 +1,11 @@
 // Command router — dispatches parsed intents to the correct handler module.
-// See: GitHub issues #8, #13, #15
+// See: GitHub issues #8, #13, #15, #34
 
 import { resolve as resolveApproval, listPending as amListPending, countPending as amCountPending } from './approvalManager.mjs';
 import { assign as pmAssign, create as pmCreate, complete as pmComplete, listOpen as pmListOpen, statusSummary as pmStatus } from './projectManager.mjs';
 import { snooze as smSnooze } from './suppressionModel.mjs';
 import { formatWithClaude } from './responseFormatter.mjs';
+import { buildDigest } from './briefingEngine.mjs';
 
 const ADMIN_ONLY = new Set(['add_project', 'assign_task', 'list_approvals']);
 
@@ -13,6 +14,7 @@ export function createRouter({
   projectManager = { assign: pmAssign, create: pmCreate, complete: pmComplete, listOpen: pmListOpen, statusSummary: pmStatus },
   suppressionModel = { snooze: smSnooze },
   responseFormatter = { formatWithClaude },
+  briefingEngine = { buildDigest },
 } = {}) {
 
   async function dispatch(intent, member, body) {
@@ -54,6 +56,12 @@ export function createRouter({
     }
 
     if (intent.command === 'status') {
+      // Per-person digest when member is known; fall back to global summary otherwise.
+      if (member?.id) {
+        const today = new Date().toISOString().split('T')[0];
+        const digest = briefingEngine.buildDigest(member.id, today);
+        return digest.formatted;
+      }
       const pendingCount = approvalManager.countPending();
       return projectManager.statusSummary(pendingCount);
     }

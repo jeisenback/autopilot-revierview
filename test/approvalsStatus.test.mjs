@@ -147,3 +147,54 @@ test('/approvals list intent parses to list_approvals command', async () => {
   const r = await parseIntent('/approvals list');
   assert.equal(r.command, 'list_approvals');
 });
+
+// ─── /status — per-person digest via commandRouter ───────────────────────────
+
+async function makeRouter(db, overrides = {}) {
+  const { createBriefingEngine } = await import('../orchestrator/briefingEngine.mjs');
+  const engine = createBriefingEngine({ db, callClaude: async () => '', getStates: async () => [], postMessage: async () => {} });
+  return createRouter({
+    approvalManager: { resolve: async () => '', listPending: () => '', countPending: () => 0 },
+    projectManager: { assign: async () => {}, create: async () => '', complete: async () => '', listOpen: () => '', statusSummary: () => 'global summary' },
+    suppressionModel: { snooze: () => {} },
+    responseFormatter: { formatWithClaude: async () => '' },
+    briefingEngine: { buildDigest: (id, date) => engine.buildDigest(id, date) },
+    ...overrides,
+  });
+}
+
+test('/status with member → returns per-person digest (contains member name)', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'status-u1' });
+  const router = await makeRouter(db);
+
+  const result = await router.dispatch({ intent: 'command', command: 'status' }, member, {});
+  assert.ok(result.includes('Alice'), 'digest should contain member name');
+});
+
+test('/status with member → does not return global statusSummary string', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'status-u2' });
+  const router = await makeRouter(db);
+
+  const result = await router.dispatch({ intent: 'command', command: 'status' }, member, {});
+  assert.ok(!result.includes('global summary'), 'should not fall through to projectManager.statusSummary');
+});
+
+test('/status without member → falls back to global statusSummary', async () => {
+  const db = makeDb();
+  const router = await makeRouter(db);
+
+  const result = await router.dispatch({ intent: 'command', command: 'status' }, null, {});
+  assert.equal(result, 'global summary');
+});
+
+test('/status digest includes today date', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'status-u3' });
+  const router = await makeRouter(db);
+  const today = new Date().toISOString().split('T')[0];
+
+  const result = await router.dispatch({ intent: 'command', command: 'status' }, member, {});
+  assert.ok(result.includes(today), 'digest should include today\'s date');
+});
