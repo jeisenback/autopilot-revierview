@@ -17,7 +17,7 @@ console.log('migrate: schema applied successfully');
 console.log(`migrate: database at ${db.name}`);
 
 // Report table counts for verification
-const tables = ['members','projects','tasks','task_dependencies','events','notification_state','approvals'];
+const tables = ['members','projects','tasks','task_dependencies','events','notification_state','approvals','spaces','space_items'];
 for (const t of tables) {
   const { n } = db.prepare(`SELECT COUNT(*) as n FROM ${t}`).get();
   console.log(`  ${t}: ${n} rows`);
