@@ -114,7 +114,7 @@ export function createBriefingEngine({
     // 4. Spaces needing attention: assigned to this member or any not-ready space
     //    (future: filter to spaces blocking a process template the member is involved in)
     const allNotReady = getSm().getNotReady();
-    const mySpaces = allNotReady.filter(s => s.assigned_to === memberId);
+    const mySpaces = allNotReady.filter(s => Number(s.assigned_to) === Number(memberId));
     // Include unassigned not-ready spaces for adults (house-wide awareness)
     const sharedSpaces = member.role === 'adult'
       ? allNotReady.filter(s => s.assigned_to == null)
@@ -171,7 +171,8 @@ export function createBriefingEngine({
       lines.push(`🏠 **Spaces needing attention (${notReadySpaces.length}):**`);
       for (const s of notReadySpaces) {
         const owner = s.assigned_to_name ? ` — ${s.assigned_to_name}` : '';
-        lines.push(`  • ${s.name}${owner}: ${s.ready_state}`);
+        const state = s.ready_state.length > 120 ? s.ready_state.slice(0, 117) + '…' : s.ready_state;
+        lines.push(`  • ${s.name}${owner}: ${state}`);
       }
     }
 

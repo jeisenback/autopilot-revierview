@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS spaces (
 -- belongs_here=0: should NOT be here (e.g. "no mail pile on counter")
 CREATE TABLE IF NOT EXISTS space_items (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  space_id     INTEGER NOT NULL REFERENCES spaces(id),
+  space_id     INTEGER NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
   name         TEXT NOT NULL,
   belongs_here INTEGER NOT NULL DEFAULT 1,
   notes        TEXT

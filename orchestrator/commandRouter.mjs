@@ -94,7 +94,7 @@ export function createRouter({
       const { space, taskCreated } = sm().setReady(match.id, isReady, { createTask: !isReady });
       const icon = space.is_ready ? '✅' : '🔴';
       let reply = `${icon} **${space.name}** marked ${isReady ? 'ready' : 'not ready'}.`;
-      if (taskCreated) reply += `\nTask created: "${taskCreated.title}" assigned to member ${taskCreated.assigned_to}.`;
+      if (taskCreated) reply += `\nTask created: "${taskCreated.title}"${space.assigned_to_name ? ` assigned to ${space.assigned_to_name}` : ''}.`;
       return reply;
     }
 

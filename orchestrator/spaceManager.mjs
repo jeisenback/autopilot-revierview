@@ -71,7 +71,7 @@ export function createSpaceManager({ db = db_singleton } = {}) {
   //
   // Returns { space, taskCreated } where taskCreated is the new task row or null.
 
-  function setReady(spaceId, isReady, { createTask = false } = {}) {
+  const _setReadyTxn = db.transaction((spaceId, isReady, createTask) => {
     const space = selectById.get(spaceId);
     if (!space) throw new Error(`spaceManager.setReady: space ${spaceId} not found`);
 
@@ -91,6 +91,10 @@ export function createSpaceManager({ db = db_singleton } = {}) {
 
     const updated = selectById.get(spaceId);
     return { space: updated, taskCreated };
+  });
+
+  function setReady(spaceId, isReady, { createTask = false } = {}) {
+    return _setReadyTxn(spaceId, isReady, createTask);
   }
 
   // ─── getNotReady ──────────────────────────────────────────────────────────
@@ -124,7 +128,8 @@ export function createSpaceManager({ db = db_singleton } = {}) {
     const lines = spaces.map(s => {
       const icon = s.is_ready ? '✅' : '🔴';
       const owner = s.assigned_to_name ? ` (${s.assigned_to_name})` : '';
-      return `${icon} **${s.name}**${owner} — ${s.ready_state}`;
+      const state = s.ready_state.length > 120 ? s.ready_state.slice(0, 117) + '…' : s.ready_state;
+      return `${icon} **${s.name}**${owner} — ${state}`;
     });
     return lines.join('\n');
   }
