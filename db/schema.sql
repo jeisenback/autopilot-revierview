@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   priority INTEGER NOT NULL DEFAULT 2 CHECK(priority IN (1,2,3)),
   recurrence TEXT CHECK(recurrence IN ('daily','weekly','monthly')),
   -- NULL = one-time. Cron expressions not supported in v1.
+  google_calendar_event_id TEXT,    -- Calendar event ID for push/update/delete
   created_from TEXT DEFAULT 'manual'
     CHECK(created_from IN ('manual','ha_event','claude')),
   created_at TEXT DEFAULT (datetime('now')),
@@ -93,7 +94,69 @@ CREATE TABLE IF NOT EXISTS approvals (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- ── Process templates ─────────────────────────────────────────────────────────
+-- Reusable recurring checklists: soccer practice, weekly reset, pickups, etc.
+
+CREATE TABLE IF NOT EXISTS process_templates (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  title            TEXT NOT NULL,
+  owner_id         INTEGER REFERENCES members(id),   -- primary responsible member
+  recurrence       TEXT NOT NULL DEFAULT 'weekly'
+    CHECK(recurrence IN ('daily','weekly','monthly','once')),
+  recurrence_day   INTEGER CHECK(recurrence_day BETWEEN 0 AND 6), -- 0=Sun … 6=Sat
+  depart_time      TEXT,          -- HH:MM local, NULL if no departure required
+  location_name    TEXT,          -- human label: "Riverview Soccer Complex"
+  location_address TEXT,          -- street address → auto-generates Maps URL
+  reward           TEXT,          -- "ice cream after", optional incentive note
+  driver_notes     TEXT,          -- reminder notes for the driver / organizer
+  active           INTEGER NOT NULL DEFAULT 1,
+  created_at       TEXT DEFAULT (datetime('now'))
+);
+
+-- Ordered checklist items inside a template.
+-- item_type: stage=physical item to gather, check=verify state,
+--            action=do something, prep=prepare in advance
+CREATE TABLE IF NOT EXISTS template_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id INTEGER NOT NULL REFERENCES process_templates(id),
+  label       TEXT NOT NULL,
+  item_type   TEXT NOT NULL DEFAULT 'stage'
+    CHECK(item_type IN ('stage','check','action','prep')),
+  quantity    INTEGER NOT NULL DEFAULT 1,
+  category    TEXT,         -- groups items: "Jordan", "meal plan", etc.
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  notes       TEXT
+);
+
+-- One scheduled instance per occurrence of a template.
+-- Auto-created by nightly cron; reminder_sent prevents duplicate DMs.
+CREATE TABLE IF NOT EXISTS template_runs (
+  id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id              INTEGER NOT NULL REFERENCES process_templates(id),
+  scheduled_for            TEXT NOT NULL,   -- YYYY-MM-DD
+  depart_at                TEXT,            -- HH:MM, copied from template (overridable)
+  status                   TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending','active','done','skipped')),
+  reminder_sent            INTEGER NOT NULL DEFAULT 0,
+  google_calendar_event_id TEXT,            -- Calendar event ID for push/update/delete
+  started_at               TEXT,
+  completed_at             TEXT,
+  created_at               TEXT DEFAULT (datetime('now'))
+);
+
+-- Per-run completion state for each checklist item.
+-- Auto-populated when a run is created.
+CREATE TABLE IF NOT EXISTS run_item_completions (
+  run_id       INTEGER NOT NULL REFERENCES template_runs(id),
+  item_id      INTEGER NOT NULL REFERENCES template_items(id),
+  completed    INTEGER NOT NULL DEFAULT 0,
+  completed_at TEXT,
+  PRIMARY KEY (run_id, item_id)
+);
+
 -- Indices for hot query paths
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_approvals_status_expires ON approvals(status, expires_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned_status ON tasks(assigned_to, status);
+CREATE INDEX IF NOT EXISTS idx_template_runs_scheduled ON template_runs(scheduled_for, status);
+CREATE INDEX IF NOT EXISTS idx_template_items_template ON template_items(template_id, sort_order);
