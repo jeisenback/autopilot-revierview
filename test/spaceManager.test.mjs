@@ -193,3 +193,28 @@ test('formatList(): shows checkmark for ready, red for not-ready', () => {
   assert.ok(result.includes('Mudroom'));
   assert.ok(result.includes('Counter'));
 });
+
+// ─── setReady idempotency ─────────────────────────────────────────────────────
+
+test('setReady(false): does not create a second tidy task if one already exists', () => {
+  const db = makeDb();
+  const memberId = seedMember(db);
+  const spaceId = seedSpace(db, { name: 'Mudroom', assignedTo: memberId, isReady: 1 });
+  const sm = createSpaceManager({ db });
+
+  // First call — creates task
+  const first = sm.setReady(spaceId, false, { createTask: true });
+  assert.ok(first.taskCreated, 'first call should create a task');
+  const firstTaskId = first.taskCreated.id;
+
+  // Reset to ready, then not-ready again
+  sm.setReady(spaceId, true);
+  const second = sm.setReady(spaceId, false, { createTask: true });
+  assert.ok(second.taskCreated, 'second call should return a task');
+  assert.equal(second.taskCreated.id, firstTaskId, 'should return the existing task, not a new one');
+
+  const taskCount = db.prepare(
+    `SELECT COUNT(*) AS n FROM tasks WHERE title = 'Tidy Mudroom' AND status NOT IN ('done','skipped')`
+  ).get().n;
+  assert.equal(taskCount, 1, 'only one open tidy task should exist');
+});

@@ -42,6 +42,15 @@ export function createSpaceManager({ db = db_singleton } = {}) {
     VALUES (@project_id, @title, @description, 'todo', @assigned_to, 'manual')
   `);
 
+  const findOpenTidyTask = db.prepare(`
+    SELECT t.id FROM tasks t
+    JOIN projects p ON p.id = t.project_id
+    WHERE p.title = 'Household tidying'
+      AND t.title = ?
+      AND t.status NOT IN ('done','skipped')
+    LIMIT 1
+  `);
+
   const findOrCreateTidyProject = (() => {
     const find = db.prepare(`SELECT id FROM projects WHERE title = 'Household tidying' LIMIT 1`);
     const insert = db.prepare(`INSERT INTO projects (title, status) VALUES ('Household tidying', 'active')`);
@@ -79,14 +88,20 @@ export function createSpaceManager({ db = db_singleton } = {}) {
 
     let taskCreated = null;
     if (!isReady && createTask && space.assigned_to) {
+      const tidyTitle = `Tidy ${space.name}`;
+      const existing = findOpenTidyTask.get(tidyTitle);
+      if (existing) {
+        taskCreated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(existing.id);
+      } else {
       const projectId = findOrCreateTidyProject();
       const result = insertTask.run({
         project_id: projectId,
-        title: `Tidy ${space.name}`,
+        title: tidyTitle,
         description: `Ready state: ${space.ready_state}`,
         assigned_to: space.assigned_to,
       });
       taskCreated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
+      }
     }
 
     const updated = selectById.get(spaceId);

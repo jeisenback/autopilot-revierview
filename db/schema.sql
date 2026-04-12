@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS run_item_completions (
 
 CREATE TABLE IF NOT EXISTS spaces (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  name        TEXT NOT NULL,
+  name        TEXT NOT NULL UNIQUE,
   location    TEXT,                        -- room/area label: "mudroom", "kitchen"
   ready_state TEXT NOT NULL,               -- human-readable exit condition:
                                            -- "shoes on rack, bag hooks clear, keys on hook"
