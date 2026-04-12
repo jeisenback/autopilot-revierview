@@ -1,7 +1,8 @@
 // Project and task CRUD — create (with Claude decompose), complete (with recurrence), list, assign.
-// See: GitHub issues #6, #15
+// See: GitHub issues #6, #15, #21
 
 import Anthropic from '@anthropic-ai/sdk';
+import { CronExpressionParser } from 'cron-parser';
 import db_singleton from '../db/db.mjs';
 import { createCalendarAdapter } from './calendarAdapter.mjs';
 
@@ -44,12 +45,22 @@ function parseDecompose(raw, fallbackTitle) {
   return [{ title: fallbackTitle, estimated_cost: 0, notes: '' }];
 }
 
-function nextDueDate(dueDate, recurrence) {
-  if (!dueDate) return null;
-  const d = new Date(dueDate);
-  if (recurrence === 'daily')   d.setDate(d.getDate() + 1);
-  if (recurrence === 'weekly')  d.setDate(d.getDate() + 7);
-  if (recurrence === 'monthly') d.setMonth(d.getMonth() + 1);
+// nextDueDate: compute the next occurrence for a task's recurrence.
+// recurrenceCron takes precedence when present (cron-parser).
+// Falls back to simple +1/+7/+30 for the legacy recurrence enum.
+// Returns YYYY-MM-DD string, or null if neither field is set.
+export function nextDueDate(dueDate, recurrence, recurrenceCron) {
+  if (recurrenceCron) {
+    // Parse from the due date + 1 second so we get the NEXT occurrence after it.
+    const from = dueDate ? new Date(`${dueDate}T00:00:01Z`) : new Date();
+    const interval = CronExpressionParser.parse(recurrenceCron, { currentDate: from, tz: 'UTC' });
+    return interval.next().toISOString().split('T')[0];
+  }
+  if (!dueDate || !recurrence) return null;
+  const d = new Date(`${dueDate}T12:00:00Z`);
+  if (recurrence === 'daily')   d.setUTCDate(d.getUTCDate() + 1);
+  if (recurrence === 'weekly')  d.setUTCDate(d.getUTCDate() + 7);
+  if (recurrence === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
   return d.toISOString().split('T')[0];
 }
 
@@ -165,16 +176,17 @@ export function createProjectManager({
           AND id IN (SELECT task_id FROM task_dependencies WHERE depends_on_task_id = ?)
       `).run(taskId);
 
-      // Recurrence: create next instance
-      if (task.recurrence) {
-        const newDue = nextDueDate(task.due_date, task.recurrence);
+      // Recurrence: create next instance (supports both legacy enum and cron expressions)
+      if (task.recurrence || task.recurrence_cron) {
+        const newDue = nextDueDate(task.due_date, task.recurrence, task.recurrence_cron);
         newTaskId = db.prepare(`
           INSERT INTO tasks (project_id, title, description, estimated_cost, requires_approval,
-                             assigned_to, due_date, priority, recurrence, created_from)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'claude')
+                             assigned_to, due_date, priority, recurrence, recurrence_cron, created_from)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'claude')
         `).run(
           task.project_id, task.title, task.description, task.estimated_cost,
-          task.requires_approval, task.assigned_to, newDue, task.priority, task.recurrence
+          task.requires_approval, task.assigned_to, newDue, task.priority,
+          task.recurrence, task.recurrence_cron
         ).lastInsertRowid;
 
         // Copy dependencies to new instance
