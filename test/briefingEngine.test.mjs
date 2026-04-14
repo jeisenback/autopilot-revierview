@@ -494,18 +494,19 @@ test('buildDigest: templateBlockers includes run blocked by not-ready space (own
   assert.equal(digest.templateBlockers[0].space_name, 'Mudroom');
 });
 
-test('buildDigest: adult sees template blockers even if not template owner', () => {
+test('buildDigest: all members see template blockers regardless of ownership', () => {
   const db = makeDb();
-  const alice = seedMember(db, { discordId: 'u-tb-2' });
-  const bob = seedMember(db, { name: 'Bob', discordId: 'u-tb-2b' });
+  const alice = seedMember(db, { discordId: 'u-tb-2', role: 'adult' });
+  const bob = seedMember(db, { name: 'Bob', discordId: 'u-tb-2b', role: 'kid' });
   const spaceId = seedSpace(db, { name: 'Kitchen', isReady: 0 });
-  seedTemplateRun(db, { title: "Bob's run", ownerId: bob.id, spaceId, date: '2026-04-12' });
+  seedTemplateRun(db, { title: "School run", ownerId: alice.id, spaceId, date: '2026-04-12' });
 
   const sm = createSpaceManager({ db });
-  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
-  const digest = engine.buildDigest(alice.id, '2026-04-12');
+  const engineAdult = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const engineKid = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
 
-  assert.equal(digest.templateBlockers.length, 1, 'adult should see all template blockers');
+  assert.equal(engineAdult.buildDigest(alice.id, '2026-04-12').templateBlockers.length, 1, 'adult sees blocker');
+  assert.equal(engineKid.buildDigest(bob.id, '2026-04-12').templateBlockers.length, 1, 'kid also sees blocker');
 });
 
 test('buildDigest: no blockers when space is ready', () => {

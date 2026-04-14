@@ -120,8 +120,9 @@ export function createBriefingEngine({
       : [];
     const notReadySpaces = [...new Map([...mySpaces, ...sharedSpaces].map(s => [s.id, s])).values()];
 
-    // 5. Template-run blockers: today's pending runs where requires_space_ready → not-ready space.
-    //    Adults see all blocked runs; kids see only runs for templates they own.
+    // 5. Template-run blockers: today's pending runs where requires_space_ready → not-ready space
+    //    AND the item hasn't already been checked off in run_item_completions.
+    //    All members (adults and kids) see all blocked runs for family-wide awareness.
     const templateBlockers = db.prepare(`
       SELECT DISTINCT
         pt.title    AS template_title,
@@ -131,12 +132,13 @@ export function createBriefingEngine({
       JOIN process_templates pt ON pt.id = tr.template_id
       JOIN template_items ti    ON ti.template_id = tr.template_id
       JOIN spaces s             ON s.id = ti.requires_space_ready
+      LEFT JOIN run_item_completions ric ON ric.run_id = tr.id AND ric.item_id = ti.id
       WHERE tr.scheduled_for = ?
         AND tr.status IN ('pending','active')
         AND s.is_ready = 0
-        AND (pt.owner_id = ? OR ? = 1)
+        AND (ric.completed IS NULL OR ric.completed = 0)
       ORDER BY tr.depart_at ASC NULLS LAST, pt.title
-    `).all(date, memberId, member.role === 'adult' ? 1 : 0);
+    `).all(date);
 
     const formatted = formatDigest(member, { myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces, templateBlockers }, date);
 
@@ -195,7 +197,8 @@ export function createBriefingEngine({
 
     if (templateBlockers.length > 0) {
       lines.push('');
-      lines.push(`⚠️ **Departure blocked (${templateBlockers.length}):**`);
+      const blockedRunCount = new Set(templateBlockers.map(b => b.template_title)).size;
+      lines.push(`⚠️ **Departure blocked — ${blockedRunCount} run${blockedRunCount !== 1 ? 's' : ''} (${templateBlockers.length} space${templateBlockers.length !== 1 ? 's' : ''} not ready):**`);
       for (const b of templateBlockers) {
         const time = b.depart_at ? ` at ${b.depart_at}` : '';
         lines.push(`  • ${b.template_title}${time} — ${b.space_name} not ready`);

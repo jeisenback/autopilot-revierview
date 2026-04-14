@@ -165,6 +165,26 @@ export function createProjectManager({
     }
 
     let newTaskId = null;
+    // Capture broadcast candidates BEFORE the transaction: status='blocked' tasks that
+    // will become fully unblocked. Must run before the UPDATE so we don't pick up tasks
+    // that were always 'todo', or the new recurring instance which starts 'todo'.
+    const broadcastCandidates = db.prepare(`
+      SELECT t.id, t.title, m.discord_dm_channel_id
+      FROM task_dependencies td
+      JOIN tasks t  ON t.id  = td.task_id
+      JOIN members m ON m.id = t.assigned_to
+      WHERE td.depends_on_task_id = ?
+        AND t.status = 'blocked'
+        AND m.discord_dm_channel_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM task_dependencies td2
+          JOIN tasks dep2 ON dep2.id = td2.depends_on_task_id
+          WHERE td2.task_id = t.id
+            AND dep2.id != ?
+            AND dep2.status NOT IN ('done','skipped')
+        )
+    `).all(taskId, taskId);
+
     db.transaction(() => {
       // Mark done
       db.prepare(`UPDATE tasks SET status='done', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?`).run(taskId);
@@ -208,17 +228,8 @@ export function createProjectManager({
     deleteTaskCalendar(taskId).catch(() => {});
     if (newTaskId) pushTaskCalendar(newTaskId).catch(() => {});
 
-    // Broadcast to assignees of tasks newly unblocked by this completion (fire-and-forget).
-    const unblockedTasks = db.prepare(`
-      SELECT t.id, t.title, m.discord_dm_channel_id
-      FROM task_dependencies td
-      JOIN tasks t  ON t.id  = td.task_id
-      JOIN members m ON m.id = t.assigned_to
-      WHERE td.depends_on_task_id = ?
-        AND t.status = 'todo'
-        AND m.discord_dm_channel_id IS NOT NULL
-    `).all(taskId);
-    for (const ut of unblockedTasks) {
+    // Broadcast to assignees of tasks newly unblocked (fire-and-forget, per-task error isolation).
+    for (const ut of broadcastCandidates) {
       postMessage(ut.discord_dm_channel_id,
         `✅ **"${ut.title}"** is now unblocked — ready to start.`
       ).catch(err => process.stderr.write(`projectManager: broadcast failed for task ${ut.id}: ${err.message}\n`));
