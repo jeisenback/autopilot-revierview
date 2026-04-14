@@ -19,6 +19,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 - `complete()` unblock query: previously set dependents to `todo` even when they had
   other remaining blockers; now only unblocks when ALL dependencies are done/skipped
+- Completion broadcasts: previously fired for tasks that were always `'todo'` (never blocked)
+  and for the new recurring instance; now only notifies tasks that were `'blocked'` and are
+  fully unblocked by this specific completion
+- Template-run departure warnings: previously surfaced even when the space-gated item was
+  already checked off in `run_item_completions`; now skips completed items
+- Kids now see departure blocked warnings (same as adults) for family-wide awareness
 
 ## [0.4.0.0] - 2026-04-12
 
