@@ -265,3 +265,54 @@ test('complete(): task with two deps only unblocks when BOTH are done', async ()
   assert.equal(messages.length, 1, 'broadcast fires once task is fully unblocked');
   assert.equal(messages[0].ch, 'dm-14b');
 });
+
+// ─── tasksAdapter wiring ──────────────────────────────────────────────────────
+
+test('create(): member with google_tasks_list_id → push called for each task', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'u20', channelId: 'dm-20' });
+  db.prepare(`UPDATE members SET google_tasks_list_id='list-abc' WHERE id=?`).run(member.id);
+  const fullMember = db.prepare('SELECT * FROM members WHERE id=?').get(member.id);
+
+  const tasks = [
+    { title: 'Buy paint', estimated_cost: 0, notes: '' },
+    { title: 'Sand walls', estimated_cost: 0, notes: '' },
+  ];
+
+  const pushCalls = [];
+  const fakeAdapter = {
+    push: async (task, m) => { pushCalls.push({ taskTitle: task.title, member: m }); return 'gt-x'; },
+  };
+
+  const pm = createProjectManager({
+    db,
+    callClaude: fakeClaude(JSON.stringify(tasks)),
+    postMessage: async () => {},
+    tasksAdapter: fakeAdapter,
+  });
+  await pm.create('Paint bedroom', fullMember);
+
+  assert.equal(pushCalls.length, 2);
+  assert.equal(pushCalls[0].member.google_tasks_list_id, 'list-abc');
+});
+
+test('complete(): task with google_task_id + assignee with list → completeRemote called', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'u21', channelId: 'dm-21' });
+  db.prepare(`UPDATE members SET google_tasks_list_id='list-xyz' WHERE id=?`).run(member.id);
+
+  const { taskId } = seedTask(db, { assignedTo: member.id });
+  db.prepare(`UPDATE tasks SET google_task_id='gt-001' WHERE id=?`).run(taskId);
+
+  const completeCalls = [];
+  const fakeAdapter = {
+    completeRemote: async (task, m) => { completeCalls.push({ taskId: task.id, member: m }); },
+  };
+
+  const pm = createProjectManager({ db, postMessage: async () => {}, tasksAdapter: fakeAdapter });
+  await pm.complete(taskId, member);
+
+  assert.equal(completeCalls.length, 1);
+  assert.equal(completeCalls[0].taskId, taskId);
+  assert.equal(completeCalls[0].member.google_tasks_list_id, 'list-xyz');
+});

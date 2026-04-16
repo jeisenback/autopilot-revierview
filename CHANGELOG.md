@@ -3,6 +3,24 @@
 All notable changes to autopilot-riverview are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.6.0.0] - 2026-04-12
+
+### Added
+- **Google Tasks sync** (`orchestrator/tasksAdapter.mjs`) — per-member push/pull sync with
+  Google Tasks; `push(task, member)` creates or updates a task in the member's list,
+  `completeRemote(task, member)` marks it done, `syncAll()` pulls completions back (#40)
+- **Shared Tasks scope** — `https://www.googleapis.com/auth/tasks` added to OAuth2 SCOPES
+  in `calendarAdapter.mjs`; `buildOAuth2Client` exported for use by tasksAdapter;
+  single re-auth covers both Calendar and Tasks (#41)
+- **Google Tasks sync cron** — `*/30 * * * *` cron in `crons.mjs` calls `syncAll()` every
+  30 minutes to pull completions done outside the app (#42)
+- **Wired into project manager** — `create()` pushes newly-created tasks to the requester's
+  Google Tasks list (if `google_tasks_list_id` set); `complete()` marks the task done in
+  Google Tasks for the assignee (if `google_task_id` set); both fire-and-forget
+- **`tasksAdapter` injectable** in `createProjectManager` — same DI pattern as `calendar`
+  for clean testing without real API calls
+- 12 new tests (tasksAdapter ×10, projectManager ×2 — 274 total suite-wide)
+
 ## [0.5.0.0] - 2026-04-12
 
 ### Added

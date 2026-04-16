@@ -5,6 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { CronExpressionParser } from 'cron-parser';
 import db_singleton from '../db/db.mjs';
 import { createCalendarAdapter } from './calendarAdapter.mjs';
+import { createTasksAdapter } from './tasksAdapter.mjs';
 
 const APPROVAL_THRESHOLD_USD = Number(process.env.APPROVAL_THRESHOLD_USD || 25);
 
@@ -69,13 +70,20 @@ export function createProjectManager({
   postMessage = defaultPostMessage,
   callClaude = defaultCallClaude,
   approvalThreshold = APPROVAL_THRESHOLD_USD,
-  calendar = null, // createCalendarAdapter() instance; null disables Calendar push
+  calendar = null,     // createCalendarAdapter() instance; null disables Calendar push
+  tasksAdapter = null, // createTasksAdapter() instance; null disables Google Tasks sync
 } = {}) {
 
   function getCalendar() {
     if (calendar === null) return null;
     if (calendar) return calendar;
     try { return createCalendarAdapter(); } catch { return null; }
+  }
+
+  function getTa() {
+    if (tasksAdapter === null) return null;
+    if (tasksAdapter) return tasksAdapter;
+    try { return createTasksAdapter(); } catch { return null; }
   }
 
   // pushTaskCalendar: push/update a task's Calendar event. No-op if no due_date.
@@ -145,6 +153,17 @@ export function createProjectManager({
           requestedBy.discord_dm_channel_id,
           `Task '${t.title}' (~$${t.cost}) needs approval before it can start.`
         ).catch(err => process.stderr.write(`projectManager: approval DM failed: ${err.message}\n`));
+      }
+    }
+
+    // 5. Push tasks to requester's Google Tasks list (fire-and-forget).
+    const ta = getTa();
+    if (ta && requestedBy?.google_tasks_list_id) {
+      for (const t of createdTasks) {
+        const fullTask = db.prepare(`SELECT * FROM tasks WHERE id=?`).get(t.id);
+        ta.push(fullTask, requestedBy).catch(err =>
+          process.stderr.write(`projectManager: Tasks push failed for task ${t.id}: ${err.message}\n`)
+        );
       }
     }
 
@@ -227,6 +246,17 @@ export function createProjectManager({
     // Calendar: delete completed task's event; push next recurrence event (non-blocking).
     deleteTaskCalendar(taskId).catch(() => {});
     if (newTaskId) pushTaskCalendar(newTaskId).catch(() => {});
+
+    // Google Tasks: mark the completed task done in the assignee's list (fire-and-forget).
+    const ta = getTa();
+    if (ta && task.google_task_id && task.assigned_to) {
+      const assignee = db.prepare(`SELECT * FROM members WHERE id=?`).get(task.assigned_to);
+      if (assignee?.google_tasks_list_id) {
+        ta.completeRemote(task, assignee).catch(err =>
+          process.stderr.write(`projectManager: Tasks completeRemote failed for task ${taskId}: ${err.message}\n`)
+        );
+      }
+    }
 
     // Broadcast to assignees of tasks newly unblocked (fire-and-forget, per-task error isolation).
     for (const ut of broadcastCandidates) {

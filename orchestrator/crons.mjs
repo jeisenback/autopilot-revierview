@@ -6,6 +6,7 @@ import db_singleton from '../db/db.mjs';
 import { expireStale } from './approvalManager.mjs';
 import { registerCron as registerBriefingCron, sendAllDigests } from './briefingEngine.mjs';
 import { scheduleTomorrow, sendDepartureReminders } from './templateEngine.mjs';
+import { syncAll as syncGoogleTasks } from './tasksAdapter.mjs';
 
 // resetDailyCounts: exported for direct testing without cron machinery.
 export function resetDailyCounts(db = db_singleton) {
@@ -57,6 +58,13 @@ export function registerAll(cron, db = db_singleton) {
   cron.schedule('*/5 * * * *', () => {
     sendDepartureReminders().catch(err => {
       process.stderr.write(`cron: sendDepartureReminders failed: ${err.message}\n`);
+    });
+  });
+
+  // Google Tasks sync — every 30 minutes (pull completions from Google Tasks to local DB)
+  cron.schedule('*/30 * * * *', () => {
+    syncGoogleTasks().catch(err => {
+      process.stderr.write(`cron: syncGoogleTasks failed: ${err.message}\n`);
     });
   });
 }
