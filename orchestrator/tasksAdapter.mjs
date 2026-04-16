@@ -73,7 +73,12 @@ export function createTasksAdapter({
   // syncAll: pull completed Google Tasks back to local DB for every member
   // who has google_tasks_list_id configured.
   // Called from cron; per-member errors are isolated and never propagated.
-  async function syncAll() {
+  //
+  // onComplete(taskId): optional async callback invoked for each newly-completed task.
+  // When provided, the callback is responsible for marking the task done (e.g. by calling
+  // projectManager.complete()) — which runs recurrence, unblocking, and DM broadcasts.
+  // When omitted, _syncMember falls back to a direct DB status update (no side effects).
+  async function syncAll({ onComplete } = {}) {
     const members = db.prepare(`
       SELECT id, google_tasks_list_id FROM members
       WHERE google_tasks_list_id IS NOT NULL
@@ -81,35 +86,53 @@ export function createTasksAdapter({
 
     for (const member of members) {
       try {
-        await _syncMember(member);
+        await _syncMember(member, onComplete);
       } catch (err) {
         process.stderr.write(`tasksAdapter: sync failed for member ${member.id}: ${err.message}\n`);
       }
     }
   }
 
-  async function _syncMember(member) {
+  async function _syncMember(member, onComplete) {
     const client = getClient();
     // Look back 48h so we catch any completions made while the server was down.
     const updatedMin = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    const res = await client.tasks.list({
-      tasklist: member.google_tasks_list_id,
-      showCompleted: true,
-      showHidden: true,
-      updatedMin,
-    });
 
-    for (const gt of (res.data.items ?? [])) {
-      if (gt.status !== 'completed') continue;
-      const local = db.prepare(`
-        SELECT id FROM tasks WHERE google_task_id = ? AND status NOT IN ('done','skipped')
-      `).get(gt.id);
-      if (local) {
-        db.prepare(`
-          UPDATE tasks SET status='done', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?
-        `).run(local.id);
+    let pageToken;
+    do {
+      const res = await client.tasks.list({
+        tasklist: member.google_tasks_list_id,
+        showCompleted: true,
+        showHidden: true,
+        updatedMin,
+        maxResults: 100,
+        ...(pageToken ? { pageToken } : {}),
+      });
+
+      for (const gt of (res.data.items ?? [])) {
+        if (gt.status !== 'completed') continue;
+        // Guard against cross-member contamination: verify the task belongs to this member.
+        const local = db.prepare(`
+          SELECT id FROM tasks
+          WHERE google_task_id = ?
+            AND assigned_to = ?
+            AND status NOT IN ('done','skipped')
+        `).get(gt.id, member.id);
+        if (local) {
+          if (onComplete) {
+            await onComplete(local.id).catch(err =>
+              process.stderr.write(`tasksAdapter: onComplete failed for task ${local.id}: ${err.message}\n`)
+            );
+          } else {
+            db.prepare(`
+              UPDATE tasks SET status='done', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?
+            `).run(local.id);
+          }
+        }
       }
-    }
+
+      pageToken = res.data.nextPageToken;
+    } while (pageToken);
   }
 
   return { push, completeRemote, syncAll };

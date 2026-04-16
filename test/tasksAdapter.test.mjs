@@ -45,7 +45,7 @@ function makeFakeClient({ insertId = 'gt-999', patchCalls = [], insertCalls = []
         patchCalls.push({ tasklist, task, requestBody });
         return { data: {} };
       },
-      list: async () => ({ data: { items: listItems } }),
+      list: async () => ({ data: { items: listItems, nextPageToken: null } }),
     },
   };
 }
@@ -153,8 +153,8 @@ test('completeRemote(): 404 from Google Tasks API → does not throw', async () 
 
 test('syncAll(): completed Google Task → marks matching local task done', async () => {
   const db = makeDb();
-  seedMember(db, { discordId: 'u1', googleTasksListId: 'list-abc' });
-  const task = seedTask(db, { googleTaskId: 'gt-001' });
+  const member = seedMember(db, { discordId: 'u1', googleTasksListId: 'list-abc' });
+  const task = seedTask(db, { googleTaskId: 'gt-001', assignedTo: member.id });
 
   const client = makeFakeClient({
     listItems: [{ id: 'gt-001', status: 'completed' }],
@@ -169,8 +169,8 @@ test('syncAll(): completed Google Task → marks matching local task done', asyn
 
 test('syncAll(): needsAction Google Task → local task unchanged', async () => {
   const db = makeDb();
-  seedMember(db, { discordId: 'u1', googleTasksListId: 'list-abc' });
-  const task = seedTask(db, { googleTaskId: 'gt-001' });
+  const member = seedMember(db, { discordId: 'u1', googleTasksListId: 'list-abc' });
+  const task = seedTask(db, { googleTaskId: 'gt-001', assignedTo: member.id });
 
   const client = makeFakeClient({
     listItems: [{ id: 'gt-001', status: 'needsAction' }],
@@ -195,10 +195,47 @@ test('syncAll(): google_task_id not in local DB → no error, no rows changed', 
   await assert.doesNotReject(() => adapter.syncAll());
 });
 
+test('syncAll(): wrong member ownership → does not mark other member task done', async () => {
+  const db = makeDb();
+  const m1 = seedMember(db, { discordId: 'u1', googleTasksListId: 'list-abc' });
+  const m2 = seedMember(db, { discordId: 'u2', googleTasksListId: null });
+  // Task assigned to m2, but google_task_id appears in m1's list
+  const task = seedTask(db, { googleTaskId: 'gt-001', assignedTo: m2.id });
+
+  const client = makeFakeClient({
+    listItems: [{ id: 'gt-001', status: 'completed' }],
+  });
+
+  const adapter = createTasksAdapter({ db, _tasksClient: client });
+  await adapter.syncAll();
+
+  const unchanged = db.prepare('SELECT status FROM tasks WHERE id=?').get(task.id);
+  assert.equal(unchanged.status, 'todo', 'should not mark task done for wrong member');
+});
+
+test('syncAll(): onComplete callback invoked instead of direct DB write', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'u1', googleTasksListId: 'list-abc' });
+  const task = seedTask(db, { googleTaskId: 'gt-001', assignedTo: member.id });
+
+  const client = makeFakeClient({
+    listItems: [{ id: 'gt-001', status: 'completed' }],
+  });
+
+  const completed = [];
+  const adapter = createTasksAdapter({ db, _tasksClient: client });
+  await adapter.syncAll({ onComplete: async (id) => { completed.push(id); } });
+
+  assert.deepEqual(completed, [task.id], 'onComplete should be called with local task id');
+  // Direct DB write should NOT have happened — status unchanged
+  const unchanged = db.prepare('SELECT status FROM tasks WHERE id=?').get(task.id);
+  assert.equal(unchanged.status, 'todo', 'DB should not be written when onComplete is provided');
+});
+
 test('syncAll(): already-done local task → not double-updated (idempotent)', async () => {
   const db = makeDb();
-  seedMember(db, { discordId: 'u1', googleTasksListId: 'list-abc' });
-  const task = seedTask(db, { googleTaskId: 'gt-001' });
+  const member = seedMember(db, { discordId: 'u1', googleTasksListId: 'list-abc' });
+  const task = seedTask(db, { googleTaskId: 'gt-001', assignedTo: member.id });
   db.prepare(`UPDATE tasks SET status='done' WHERE id=?`).run(task.id);
 
   const client = makeFakeClient({

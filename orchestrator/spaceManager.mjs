@@ -87,25 +87,28 @@ export function createSpaceManager({ db = db_singleton } = {}) {
     updateIsReady.run(isReady ? 1 : 0, spaceId);
 
     let taskCreated = null;
+    let taskIsNew = false;
     if (!isReady && createTask && space.assigned_to) {
       const tidyTitle = `Tidy ${space.name}`;
       const existing = findOpenTidyTask.get(tidyTitle);
       if (existing) {
         taskCreated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(existing.id);
+        taskIsNew = false;
       } else {
-      const projectId = findOrCreateTidyProject();
-      const result = insertTask.run({
-        project_id: projectId,
-        title: tidyTitle,
-        description: `Ready state: ${space.ready_state}`,
-        assigned_to: space.assigned_to,
-      });
-      taskCreated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
+        const projectId = findOrCreateTidyProject();
+        const result = insertTask.run({
+          project_id: projectId,
+          title: tidyTitle,
+          description: `Ready state: ${space.ready_state}`,
+          assigned_to: space.assigned_to,
+        });
+        taskCreated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
+        taskIsNew = true;
       }
     }
 
     const updated = selectById.get(spaceId);
-    return { space: updated, taskCreated };
+    return { space: updated, taskCreated, taskIsNew };
   });
 
   function setReady(spaceId, isReady, { createTask = false } = {}) {

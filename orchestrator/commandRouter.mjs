@@ -8,7 +8,7 @@ import { formatWithClaude } from './responseFormatter.mjs';
 import { buildDigest } from './briefingEngine.mjs';
 import { createSpaceManager } from './spaceManager.mjs';
 
-const ADMIN_ONLY = new Set(['add_project', 'assign_task', 'list_approvals']);
+const ADMIN_ONLY = new Set(['add_project', 'assign_task', 'list_approvals', 'space_set_ready', 'space_set_not_ready']);
 
 let _defaultSpaceManager = null;
 function getDefaultSpaceManager() {
@@ -87,14 +87,17 @@ export function createRouter({
       if (!nameArg) return 'Usage: /space set-ready <name>';
 
       const spaces = sm().getAll();
-      const match = spaces.find(s => s.name.toLowerCase() === nameArg)
-        ?? spaces.find(s => s.name.toLowerCase().includes(nameArg));
-      if (!match) return `Space not found: "${intent.args?.name}". Try /space list.`;
+      const exact   = spaces.filter(s => s.name.toLowerCase() === nameArg);
+      const partial = exact.length ? exact : spaces.filter(s => s.name.toLowerCase().includes(nameArg));
+      if (partial.length === 0) return `Space not found: "${intent.args?.name}". Try /space list.`;
+      if (partial.length > 1)   return `Ambiguous name — matches: ${partial.map(s => s.name).join(', ')}. Be more specific.`;
+      const match = partial[0];
 
-      const { space, taskCreated } = sm().setReady(match.id, isReady, { createTask: !isReady });
+      const { space, taskCreated, taskIsNew } = sm().setReady(match.id, isReady, { createTask: !isReady });
       const icon = space.is_ready ? '✅' : '🔴';
       let reply = `${icon} **${space.name}** marked ${isReady ? 'ready' : 'not ready'}.`;
-      if (taskCreated) reply += `\nTidy task open: "${taskCreated.title}"${space.assigned_to_name ? ` (${space.assigned_to_name})` : ''}.`;
+      if (taskCreated && taskIsNew) reply += `\nTidy task created: "${taskCreated.title}"${space.assigned_to_name ? ` (${space.assigned_to_name})` : ''}.`;
+      else if (taskCreated) reply += `\nTidy task already open: "${taskCreated.title}"${space.assigned_to_name ? ` (${space.assigned_to_name})` : ''}.`;
       return reply;
     }
 

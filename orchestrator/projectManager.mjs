@@ -156,7 +156,7 @@ export function createProjectManager({
       }
     }
 
-    // 5. Push tasks to requester's Google Tasks list (fire-and-forget).
+    // 6. Push tasks to requester's Google Tasks list (fire-and-forget).
     const ta = getTa();
     if (ta && requestedBy?.google_tasks_list_id) {
       for (const t of createdTasks) {
@@ -167,7 +167,7 @@ export function createProjectManager({
       }
     }
 
-    // 5. Return checklist string
+    // 7. Return checklist string
     const lines = createdTasks.map(t => {
       const flag = t.needsApproval ? ' ⏳ awaiting approval' : '';
       return `- [ ] ${t.title}${flag}`;
