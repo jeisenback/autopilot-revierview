@@ -112,7 +112,6 @@ export function createBriefingEngine({
     `).all(memberId);
 
     // 4. Spaces needing attention: assigned to this member or any not-ready space
-    //    (future: filter to spaces blocking a process template the member is involved in)
     const allNotReady = getSm().getNotReady();
     const mySpaces = allNotReady.filter(s => Number(s.assigned_to) === Number(memberId));
     // Include unassigned not-ready spaces for adults (house-wide awareness)
@@ -121,15 +120,35 @@ export function createBriefingEngine({
       : [];
     const notReadySpaces = [...new Map([...mySpaces, ...sharedSpaces].map(s => [s.id, s])).values()];
 
-    const formatted = formatDigest(member, { myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces }, date);
+    // 5. Template-run blockers: today's pending runs where requires_space_ready → not-ready space
+    //    AND the item hasn't already been checked off in run_item_completions.
+    //    All members (adults and kids) see all blocked runs for family-wide awareness.
+    const templateBlockers = db.prepare(`
+      SELECT DISTINCT
+        pt.title    AS template_title,
+        s.name      AS space_name,
+        tr.depart_at
+      FROM template_runs tr
+      JOIN process_templates pt ON pt.id = tr.template_id
+      JOIN template_items ti    ON ti.template_id = tr.template_id
+      JOIN spaces s             ON s.id = ti.requires_space_ready
+      LEFT JOIN run_item_completions ric ON ric.run_id = tr.id AND ric.item_id = ti.id
+      WHERE tr.scheduled_for = ?
+        AND tr.status IN ('pending','active')
+        AND s.is_ready = 0
+        AND (ric.completed IS NULL OR ric.completed = 0)
+      ORDER BY tr.depart_at ASC NULLS LAST, pt.title
+    `).all(date);
 
-    return { member, myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces, formatted };
+    const formatted = formatDigest(member, { myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces, templateBlockers }, date);
+
+    return { member, myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces, templateBlockers, formatted };
   }
 
   // ── formatDigest ─────────────────────────────────────────────────────────────
   // Renders the digest as a plain-text string suitable for Discord DM.
   // Upgrade path: swap for embed builder once discord_router supports /push.
-  function formatDigest(member, { myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces = [] }, date) {
+  function formatDigest(member, { myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces = [], templateBlockers = [] }, date) {
     const lines = [];
     const greeting = member.role === 'kid' ? `Hey ${member.name}!` : `Good morning, ${member.name}.`;
     lines.push(`**${greeting}** Here's your day (${date}):\n`);
@@ -173,6 +192,16 @@ export function createBriefingEngine({
         const owner = s.assigned_to_name ? ` — ${s.assigned_to_name}` : '';
         const state = s.ready_state.length > 120 ? s.ready_state.slice(0, 117) + '…' : s.ready_state;
         lines.push(`  • ${s.name}${owner}: ${state}`);
+      }
+    }
+
+    if (templateBlockers.length > 0) {
+      lines.push('');
+      const blockedRunCount = new Set(templateBlockers.map(b => b.template_title)).size;
+      lines.push(`⚠️ **Departure blocked — ${blockedRunCount} run${blockedRunCount !== 1 ? 's' : ''} (${templateBlockers.length} space${templateBlockers.length !== 1 ? 's' : ''} not ready):**`);
+      for (const b of templateBlockers) {
+        const time = b.depart_at ? ` at ${b.depart_at}` : '';
+        lines.push(`  • ${b.template_title}${time} — ${b.space_name} not ready`);
       }
     }
 
