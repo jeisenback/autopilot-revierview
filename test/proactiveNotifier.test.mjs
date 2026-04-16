@@ -189,6 +189,7 @@ test('orchestrator: calls syncDmChannel when discord_dm_channel_id is null', asy
   const orch = createOrchestrator({
     db,
     syncDmChannel: async (member) => { synced.push(member.discord_user_id); },
+    dispatch: async () => 'ok',
   });
 
   await orch.handle({
@@ -209,6 +210,7 @@ test('orchestrator: skips syncDmChannel when dm channel already set', async () =
   const orch = createOrchestrator({
     db,
     syncDmChannel: async (member) => { synced.push(member.discord_user_id); },
+    dispatch: async () => 'ok',
   });
 
   await orch.handle({

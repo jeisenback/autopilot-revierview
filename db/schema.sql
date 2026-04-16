@@ -121,15 +121,16 @@ CREATE TABLE IF NOT EXISTS process_templates (
 -- item_type: stage=physical item to gather, check=verify state,
 --            action=do something, prep=prepare in advance
 CREATE TABLE IF NOT EXISTS template_items (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  template_id INTEGER NOT NULL REFERENCES process_templates(id),
-  label       TEXT NOT NULL,
-  item_type   TEXT NOT NULL DEFAULT 'stage'
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id         INTEGER NOT NULL REFERENCES process_templates(id),
+  label               TEXT NOT NULL,
+  item_type           TEXT NOT NULL DEFAULT 'stage'
     CHECK(item_type IN ('stage','check','action','prep')),
-  quantity    INTEGER NOT NULL DEFAULT 1,
-  category    TEXT,         -- groups items: "Jordan", "meal plan", etc.
-  sort_order  INTEGER NOT NULL DEFAULT 0,
-  notes       TEXT
+  quantity            INTEGER NOT NULL DEFAULT 1,
+  category            TEXT,         -- groups items: "Jordan", "meal plan", etc.
+  sort_order          INTEGER NOT NULL DEFAULT 0,
+  notes               TEXT,
+  requires_space_ready INTEGER REFERENCES spaces(id)  -- NULL = no space dependency
 );
 
 -- One scheduled instance per occurrence of a template.

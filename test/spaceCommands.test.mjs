@@ -171,5 +171,61 @@ test('/space set-not-ready: mentions tidy task when created', async () => {
     { intent: 'command', command: 'space_set_not_ready', args: { name: 'Mudroom' } },
     null, {}
   );
-  assert.ok(result.includes('Task created') || result.includes('Tidy'));
+  assert.ok(result.includes('Tidy task created'), `Expected "Tidy task created" in: ${result}`);
+});
+
+test('/space set-not-ready: says "already open" when tidy task already exists', async () => {
+  const db = makeDb();
+  const member = seedMember(db);
+  db.prepare(`INSERT INTO spaces (name, ready_state, is_ready, assigned_to) VALUES ('Mudroom', 'hooks clear', 1, ?)`).run(member.id);
+  const router = makeRouter(db);
+  // First call creates the task
+  await router.dispatch(
+    { intent: 'command', command: 'space_set_not_ready', args: { name: 'Mudroom' } },
+    null, {}
+  );
+  // Mark ready again so the next set-not-ready triggers task lookup
+  await router.dispatch(
+    { intent: 'command', command: 'space_set_ready', args: { name: 'Mudroom' } },
+    null, {}
+  );
+  const result = await router.dispatch(
+    { intent: 'command', command: 'space_set_not_ready', args: { name: 'Mudroom' } },
+    null, {}
+  );
+  assert.ok(result.includes('already open'), `Expected "already open" in: ${result}`);
+});
+
+// ─── kid role restrictions ─────────────────────────────────────────────────────
+
+function seedKid(db, discordId = 'kid1') {
+  const { lastInsertRowid } = db.prepare(
+    `INSERT INTO members (name, discord_user_id, discord_dm_channel_id, role) VALUES ('Bob', ?, 'dm-2', 'kid')`
+  ).run(discordId);
+  db.prepare(`INSERT INTO notification_state (member_id) VALUES (?)`).run(lastInsertRowid);
+  return db.prepare('SELECT * FROM members WHERE id=?').get(lastInsertRowid);
+}
+
+test('/space set-ready: kid role → rejected', async () => {
+  const db = makeDb();
+  seedSpace(db, { name: 'Mudroom', isReady: 0 });
+  const kid = seedKid(db);
+  const router = makeRouter(db);
+  const result = await router.dispatch(
+    { intent: 'command', command: 'space_set_ready', args: { name: 'Mudroom' } },
+    kid, {}
+  );
+  assert.ok(result.toLowerCase().includes('parent'), `Expected parent message, got: ${result}`);
+});
+
+test('/space set-not-ready: kid role → rejected', async () => {
+  const db = makeDb();
+  seedSpace(db, { name: 'Mudroom', isReady: 1 });
+  const kid = seedKid(db);
+  const router = makeRouter(db);
+  const result = await router.dispatch(
+    { intent: 'command', command: 'space_set_not_ready', args: { name: 'Mudroom' } },
+    kid, {}
+  );
+  assert.ok(result.toLowerCase().includes('parent'), `Expected parent message, got: ${result}`);
 });

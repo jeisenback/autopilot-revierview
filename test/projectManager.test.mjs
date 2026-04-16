@@ -192,3 +192,127 @@ test('complete(): completing task unblocks dependent task', async () => {
   const blocked = db.prepare('SELECT * FROM tasks WHERE id=?').get(blockedId);
   assert.equal(blocked.status, 'todo');
 });
+
+// ─── complete(): completion broadcasts ────────────────────────────────────────
+
+test('complete(): broadcasts to assignee of newly-unblocked task', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'u10', channelId: 'dm-10' });
+  const assignee = seedMember(db, { discordId: 'u11', channelId: 'dm-11' });
+
+  const { taskId } = seedTask(db, { title: 'prereq' });
+  const projectId = db.prepare(`SELECT project_id FROM tasks WHERE id=?`).get(taskId).project_id;
+  const blockedId = db.prepare(
+    `INSERT INTO tasks (project_id, title, status, assigned_to) VALUES (?, 'next task', 'blocked', ?)`
+  ).run(projectId, assignee.id).lastInsertRowid;
+  db.prepare(`INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)`).run(blockedId, taskId);
+
+  const messages = [];
+  const pm = createProjectManager({ db, postMessage: async (ch, txt) => messages.push({ ch, txt }) });
+  await pm.complete(taskId, member);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].ch, 'dm-11');
+  assert.ok(messages[0].txt.includes('next task'));
+  assert.ok(messages[0].txt.includes('unblocked'));
+});
+
+test('complete(): no broadcast when blocked task has no dm channel', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'u12', channelId: 'dm-12' });
+  const assignee = seedMember(db, { discordId: 'u13', channelId: null });
+
+  const { taskId } = seedTask(db, { title: 'prereq2' });
+  const projectId = db.prepare(`SELECT project_id FROM tasks WHERE id=?`).get(taskId).project_id;
+  const blockedId = db.prepare(
+    `INSERT INTO tasks (project_id, title, status, assigned_to) VALUES (?, 'blocked2', 'blocked', ?)`
+  ).run(projectId, assignee.id).lastInsertRowid;
+  db.prepare(`INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)`).run(blockedId, taskId);
+
+  const messages = [];
+  const pm = createProjectManager({ db, postMessage: async (ch, txt) => messages.push({ ch, txt }) });
+  await pm.complete(taskId, member);
+
+  assert.equal(messages.length, 0, 'no broadcast when assignee has no DM channel');
+});
+
+test('complete(): task with two deps only unblocks when BOTH are done', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'u14', channelId: 'dm-14' });
+  const assignee = seedMember(db, { discordId: 'u14b', channelId: 'dm-14b' });
+
+  const { taskId: dep1 } = seedTask(db, { title: 'dep1' });
+  const { taskId: dep2 } = seedTask(db, { title: 'dep2' });
+  const projectId = db.prepare(`SELECT project_id FROM tasks WHERE id=?`).get(dep1).project_id;
+  const blockedId = db.prepare(
+    `INSERT INTO tasks (project_id, title, status, assigned_to) VALUES (?, 'needs both', 'blocked', ?)`
+  ).run(projectId, assignee.id).lastInsertRowid;
+  db.prepare(`INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)`).run(blockedId, dep1);
+  db.prepare(`INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)`).run(blockedId, dep2);
+
+  const messages = [];
+  const pm = createProjectManager({ db, postMessage: async (ch, txt) => messages.push({ ch, txt }) });
+  await pm.complete(dep1, member);
+
+  // dep2 still not done → should remain blocked, no broadcast
+  const still = db.prepare('SELECT status FROM tasks WHERE id=?').get(blockedId);
+  assert.equal(still.status, 'blocked', 'should stay blocked until ALL deps are done');
+  assert.equal(messages.length, 0, 'no broadcast when task still has remaining deps');
+
+  await pm.complete(dep2, member);
+  const now = db.prepare('SELECT status FROM tasks WHERE id=?').get(blockedId);
+  assert.equal(now.status, 'todo', 'should unblock once all deps are done');
+  assert.equal(messages.length, 1, 'broadcast fires once task is fully unblocked');
+  assert.equal(messages[0].ch, 'dm-14b');
+});
+
+// ─── tasksAdapter wiring ──────────────────────────────────────────────────────
+
+test('create(): member with google_tasks_list_id → push called for each task', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'u20', channelId: 'dm-20' });
+  db.prepare(`UPDATE members SET google_tasks_list_id='list-abc' WHERE id=?`).run(member.id);
+  const fullMember = db.prepare('SELECT * FROM members WHERE id=?').get(member.id);
+
+  const tasks = [
+    { title: 'Buy paint', estimated_cost: 0, notes: '' },
+    { title: 'Sand walls', estimated_cost: 0, notes: '' },
+  ];
+
+  const pushCalls = [];
+  const fakeAdapter = {
+    push: async (task, m) => { pushCalls.push({ taskTitle: task.title, member: m }); return 'gt-x'; },
+  };
+
+  const pm = createProjectManager({
+    db,
+    callClaude: fakeClaude(JSON.stringify(tasks)),
+    postMessage: async () => {},
+    tasksAdapter: fakeAdapter,
+  });
+  await pm.create('Paint bedroom', fullMember);
+
+  assert.equal(pushCalls.length, 2);
+  assert.equal(pushCalls[0].member.google_tasks_list_id, 'list-abc');
+});
+
+test('complete(): task with google_task_id + assignee with list → completeRemote called', async () => {
+  const db = makeDb();
+  const member = seedMember(db, { discordId: 'u21', channelId: 'dm-21' });
+  db.prepare(`UPDATE members SET google_tasks_list_id='list-xyz' WHERE id=?`).run(member.id);
+
+  const { taskId } = seedTask(db, { assignedTo: member.id });
+  db.prepare(`UPDATE tasks SET google_task_id='gt-001' WHERE id=?`).run(taskId);
+
+  const completeCalls = [];
+  const fakeAdapter = {
+    completeRemote: async (task, m) => { completeCalls.push({ taskId: task.id, member: m }); },
+  };
+
+  const pm = createProjectManager({ db, postMessage: async () => {}, tasksAdapter: fakeAdapter });
+  await pm.complete(taskId, member);
+
+  assert.equal(completeCalls.length, 1);
+  assert.equal(completeCalls[0].taskId, taskId);
+  assert.equal(completeCalls[0].member.google_tasks_list_id, 'list-xyz');
+});

@@ -12,7 +12,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
 
-const SCOPES = ['https://www.googleapis.com/auth/calendar'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/tasks',
+];
 const SECRETS_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../secrets.json',
@@ -35,7 +38,8 @@ function saveSecrets(data) {
 
 // Build an OAuth2 client from secrets.json.
 // Throws if client_id / client_secret are missing.
-function buildOAuth2Client() {
+// Exported so tasksAdapter can share the same credentials and token store.
+export function buildOAuth2Client() {
   const secrets = loadSecrets();
   const clientId = secrets.google_client_id ?? process.env.GOOGLE_CLIENT_ID;
   const clientSecret = secrets.google_client_secret ?? process.env.GOOGLE_CLIENT_SECRET;

@@ -3,12 +3,13 @@
 
 import db_singleton from '../db/db.mjs';
 import { parseIntent } from './intentParser.mjs';
-import { dispatch } from './commandRouter.mjs';
+import { dispatch as defaultDispatch } from './commandRouter.mjs';
 import { syncDmChannel as defaultSyncDmChannel } from './proactiveNotifier.mjs';
 
 export function createOrchestrator({
   db = db_singleton,
   syncDmChannel = defaultSyncDmChannel,
+  dispatch = defaultDispatch,
 } = {}) {
   async function handle(body) {
     // 1. Look up member by discord_user_id

@@ -5,6 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { CronExpressionParser } from 'cron-parser';
 import db_singleton from '../db/db.mjs';
 import { createCalendarAdapter } from './calendarAdapter.mjs';
+import { createTasksAdapter } from './tasksAdapter.mjs';
 
 const APPROVAL_THRESHOLD_USD = Number(process.env.APPROVAL_THRESHOLD_USD || 25);
 
@@ -69,13 +70,20 @@ export function createProjectManager({
   postMessage = defaultPostMessage,
   callClaude = defaultCallClaude,
   approvalThreshold = APPROVAL_THRESHOLD_USD,
-  calendar = null, // createCalendarAdapter() instance; null disables Calendar push
+  calendar = null,     // createCalendarAdapter() instance; null disables Calendar push
+  tasksAdapter = null, // createTasksAdapter() instance; null disables Google Tasks sync
 } = {}) {
 
   function getCalendar() {
     if (calendar === null) return null;
     if (calendar) return calendar;
     try { return createCalendarAdapter(); } catch { return null; }
+  }
+
+  function getTa() {
+    if (tasksAdapter === null) return null;
+    if (tasksAdapter) return tasksAdapter;
+    try { return createTasksAdapter(); } catch { return null; }
   }
 
   // pushTaskCalendar: push/update a task's Calendar event. No-op if no due_date.
@@ -148,7 +156,18 @@ export function createProjectManager({
       }
     }
 
-    // 5. Return checklist string
+    // 6. Push tasks to requester's Google Tasks list (fire-and-forget).
+    const ta = getTa();
+    if (ta && requestedBy?.google_tasks_list_id) {
+      for (const t of createdTasks) {
+        const fullTask = db.prepare(`SELECT * FROM tasks WHERE id=?`).get(t.id);
+        ta.push(fullTask, requestedBy).catch(err =>
+          process.stderr.write(`projectManager: Tasks push failed for task ${t.id}: ${err.message}\n`)
+        );
+      }
+    }
+
+    // 7. Return checklist string
     const lines = createdTasks.map(t => {
       const flag = t.needsApproval ? ' ⏳ awaiting approval' : '';
       return `- [ ] ${t.title}${flag}`;
@@ -165,16 +184,43 @@ export function createProjectManager({
     }
 
     let newTaskId = null;
+    // Capture broadcast candidates BEFORE the transaction: status='blocked' tasks that
+    // will become fully unblocked. Must run before the UPDATE so we don't pick up tasks
+    // that were always 'todo', or the new recurring instance which starts 'todo'.
+    const broadcastCandidates = db.prepare(`
+      SELECT t.id, t.title, m.discord_dm_channel_id
+      FROM task_dependencies td
+      JOIN tasks t  ON t.id  = td.task_id
+      JOIN members m ON m.id = t.assigned_to
+      WHERE td.depends_on_task_id = ?
+        AND t.status = 'blocked'
+        AND m.discord_dm_channel_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM task_dependencies td2
+          JOIN tasks dep2 ON dep2.id = td2.depends_on_task_id
+          WHERE td2.task_id = t.id
+            AND dep2.id != ?
+            AND dep2.status NOT IN ('done','skipped')
+        )
+    `).all(taskId, taskId);
+
     db.transaction(() => {
       // Mark done
       db.prepare(`UPDATE tasks SET status='done', updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?`).run(taskId);
 
-      // Unblock dependents
+      // Unblock dependents: tasks that depended only on this task (all their deps are now done/skipped)
       db.prepare(`
         UPDATE tasks SET status='todo'
         WHERE status='blocked'
           AND id IN (SELECT task_id FROM task_dependencies WHERE depends_on_task_id = ?)
-      `).run(taskId);
+          AND NOT EXISTS (
+            SELECT 1 FROM task_dependencies td2
+            JOIN tasks dep2 ON dep2.id = td2.depends_on_task_id
+            WHERE td2.task_id = tasks.id
+              AND dep2.id != ?
+              AND dep2.status NOT IN ('done','skipped')
+          )
+      `).run(taskId, taskId);
 
       // Recurrence: create next instance (supports both legacy enum and cron expressions)
       if (task.recurrence || task.recurrence_cron) {
@@ -200,6 +246,24 @@ export function createProjectManager({
     // Calendar: delete completed task's event; push next recurrence event (non-blocking).
     deleteTaskCalendar(taskId).catch(() => {});
     if (newTaskId) pushTaskCalendar(newTaskId).catch(() => {});
+
+    // Google Tasks: mark the completed task done in the assignee's list (fire-and-forget).
+    const ta = getTa();
+    if (ta && task.google_task_id && task.assigned_to) {
+      const assignee = db.prepare(`SELECT * FROM members WHERE id=?`).get(task.assigned_to);
+      if (assignee?.google_tasks_list_id) {
+        ta.completeRemote(task, assignee).catch(err =>
+          process.stderr.write(`projectManager: Tasks completeRemote failed for task ${taskId}: ${err.message}\n`)
+        );
+      }
+    }
+
+    // Broadcast to assignees of tasks newly unblocked (fire-and-forget, per-task error isolation).
+    for (const ut of broadcastCandidates) {
+      postMessage(ut.discord_dm_channel_id,
+        `✅ **"${ut.title}"** is now unblocked — ready to start.`
+      ).catch(err => process.stderr.write(`projectManager: broadcast failed for task ${ut.id}: ${err.message}\n`));
+    }
 
     return `Task '${task.title}' marked done.`;
   }
