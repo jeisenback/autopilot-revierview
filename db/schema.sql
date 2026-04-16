@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS members (
   quiet_end TEXT DEFAULT '07:00',       -- HH:MM local
   timezone TEXT DEFAULT 'America/Chicago',
   max_daily_notifications INTEGER NOT NULL DEFAULT 5,
+  google_tasks_list_id TEXT,            -- Google Tasks list ID for sync (Phase 3)
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   recurrence_cron TEXT,             -- cron expression, e.g. '0 9 * * 1,3' (Mon+Wed 9am)
   -- recurrence_cron takes precedence over recurrence when both are set.
   google_calendar_event_id TEXT,    -- Calendar event ID for push/update/delete
+  google_task_id TEXT,              -- Google Tasks task ID for sync (Phase 3)
   created_from TEXT DEFAULT 'manual'
     CHECK(created_from IN ('manual','ha_event','claude')),
   created_at TEXT DEFAULT (datetime('now')),
@@ -156,7 +158,33 @@ CREATE TABLE IF NOT EXISTS run_item_completions (
   PRIMARY KEY (run_id, item_id)
 );
 
--- Indices for hot query paths
+-- ── Spaces ────────────────────────────────────────────────────────────────────
+-- Physical locations with testable ready-states. Clutter comes from the absence
+-- of a clear binary — "is the mudroom ready?" is answerable; "is the house clean?" is not.
+
+CREATE TABLE IF NOT EXISTS spaces (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL UNIQUE,
+  location    TEXT,                        -- room/area label: "mudroom", "kitchen"
+  ready_state TEXT NOT NULL,               -- human-readable exit condition:
+                                           -- "shoes on rack, bag hooks clear, keys on hook"
+  is_ready    INTEGER NOT NULL DEFAULT 1,  -- 1=ready, 0=not ready
+  assigned_to INTEGER REFERENCES members(id),
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
+-- Individual items that define or populate a space.
+-- belongs_here=1: should be here (e.g. "keys on hook")
+-- belongs_here=0: should NOT be here (e.g. "no mail pile on counter")
+CREATE TABLE IF NOT EXISTS space_items (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  space_id     INTEGER NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  belongs_here INTEGER NOT NULL DEFAULT 1,
+  notes        TEXT
+);
+
+-- ── Indices for hot query paths ───────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_approvals_status_expires ON approvals(status, expires_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned_status ON tasks(assigned_to, status);

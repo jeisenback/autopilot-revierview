@@ -42,6 +42,18 @@ const FAST_PATHS = [
     re: /^\/status\b/i,
     parse: () => ({ intent: 'command', command: 'status' }),
   },
+  {
+    re: /^\/space\s+list\b/i,
+    parse: () => ({ intent: 'command', command: 'space_list' }),
+  },
+  {
+    re: /^\/space\s+set-ready\s+(.+)/i,
+    parse: m => ({ intent: 'command', command: 'space_set_ready', args: { name: m[1].trim() } }),
+  },
+  {
+    re: /^\/space\s+set-not-ready\s+(.+)/i,
+    parse: m => ({ intent: 'command', command: 'space_set_not_ready', args: { name: m[1].trim() } }),
+  },
 ];
 
 async function defaultCallClaude(text) {

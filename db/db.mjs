@@ -14,4 +14,7 @@ db.pragma('journal_mode = WAL');
 // Prevents SQLITE_BUSY errors when Discord bot and UI API write concurrently.
 db.pragma('busy_timeout = 3000');
 
+// Foreign key enforcement is off by default in SQLite; must be enabled per connection.
+db.pragma('foreign_keys = ON');
+
 export default db;

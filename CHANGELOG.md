@@ -3,6 +3,27 @@
 All notable changes to autopilot-riverview are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0.0] - 2026-04-12
+
+### Added
+- **Spaces schema** — `spaces` and `space_items` tables with testable binary ready-states;
+  `google_task_id` on tasks and `google_tasks_list_id` on members (Phase 3 prep columns)
+- **`spaceManager.mjs`** — CRUD module for spaces: `getAll`, `getById`, `setReady`,
+  `getNotReady`, `getBlockingSpaces`, `getItems`, `formatList`; `setReady(id, false, {createTask})`
+  auto-creates a "Tidy [space]" task for the assigned member
+- **`/space` Discord commands** — `/space list`, `/space set-ready <name>`,
+  `/space set-not-ready <name>`; name matching is exact-first, then partial, case-insensitive
+- **Spaces in daily digest** — `buildDigest` now includes a "Spaces needing attention" section:
+  spaces assigned to the member, plus unassigned not-ready spaces for adult members
+- **Sample Riverview spaces** in `db/seed.mjs` — Mudroom, Kitchen Counter, Master Closet,
+  Kids' Backpack Zone; idempotent by name
+- 55 new tests across `schema.test.mjs`, `spaceManager.test.mjs`, `spaceCommands.test.mjs`,
+  and `briefingEngine.test.mjs` (250 total in suite)
+
+### Changed
+- `commandRouter.mjs` singleton and `spaceManager` initialization are now lazy to avoid
+  DB access at import time (allows in-memory test DBs without production schema)
+
 ## [0.3.0.0] - 2026-04-12
 
 ### Added

@@ -1,9 +1,10 @@
 // Briefing engine — generates and posts the daily morning briefing.
-// See: GitHub issues #9, #32
+// See: GitHub issues #9, #32, #39
 
 import Anthropic from '@anthropic-ai/sdk';
 import db_singleton from '../db/db.mjs';
 import * as haAdapter from './haAdapter.mjs';
+import { createSpaceManager } from './spaceManager.mjs';
 
 const BRIEFING_SYSTEM = `You are a household chief of staff writing a morning briefing.
 3-5 bullets. Direct, practical. Include: overdue or due-today tasks, any HA alerts,
@@ -39,7 +40,11 @@ export function createBriefingEngine({
   postMessage = defaultPostMessage,
   channelId = process.env.BRIEFING_CHANNEL_ID || '',
   monitoredEntities = (process.env.HA_MONITORED_ENTITIES || '').split(',').map(s => s.trim()).filter(Boolean),
+  spaceManager = null,
 } = {}) {
+  // Lazy: only create if not injected, to avoid real-DB access during tests
+  let _sm = spaceManager;
+  function getSm() { if (!_sm) _sm = createSpaceManager({ db }); return _sm; }
 
   // ── buildDigest ──────────────────────────────────────────────────────────────
   // Returns structured digest data for one member. Pure read, no side effects.
@@ -106,15 +111,25 @@ export function createBriefingEngine({
         )
     `).all(memberId);
 
-    const formatted = formatDigest(member, { myTasks, overdue, dueToday, blocking, unblocked }, date);
+    // 4. Spaces needing attention: assigned to this member or any not-ready space
+    //    (future: filter to spaces blocking a process template the member is involved in)
+    const allNotReady = getSm().getNotReady();
+    const mySpaces = allNotReady.filter(s => Number(s.assigned_to) === Number(memberId));
+    // Include unassigned not-ready spaces for adults (house-wide awareness)
+    const sharedSpaces = member.role === 'adult'
+      ? allNotReady.filter(s => s.assigned_to == null)
+      : [];
+    const notReadySpaces = [...new Map([...mySpaces, ...sharedSpaces].map(s => [s.id, s])).values()];
 
-    return { member, myTasks, overdue, dueToday, blocking, unblocked, formatted };
+    const formatted = formatDigest(member, { myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces }, date);
+
+    return { member, myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces, formatted };
   }
 
   // ── formatDigest ─────────────────────────────────────────────────────────────
   // Renders the digest as a plain-text string suitable for Discord DM.
   // Upgrade path: swap for embed builder once discord_router supports /push.
-  function formatDigest(member, { myTasks, overdue, dueToday, blocking, unblocked }, date) {
+  function formatDigest(member, { myTasks, overdue, dueToday, blocking, unblocked, notReadySpaces = [] }, date) {
     const lines = [];
     const greeting = member.role === 'kid' ? `Hey ${member.name}!` : `Good morning, ${member.name}.`;
     lines.push(`**${greeting}** Here's your day (${date}):\n`);
@@ -149,6 +164,16 @@ export function createBriefingEngine({
       lines.push('');
       lines.push(`✅ **Now unblocked for you:**`);
       for (const u of unblocked) lines.push(`  • ${u.title} [${u.project_title}]`);
+    }
+
+    if (notReadySpaces.length > 0) {
+      lines.push('');
+      lines.push(`🏠 **Spaces needing attention (${notReadySpaces.length}):**`);
+      for (const s of notReadySpaces) {
+        const owner = s.assigned_to_name ? ` — ${s.assigned_to_name}` : '';
+        const state = s.ready_state.length > 120 ? s.ready_state.slice(0, 117) + '…' : s.ready_state;
+        lines.push(`  • ${s.name}${owner}: ${state}`);
+      }
     }
 
     return lines.join('\n');

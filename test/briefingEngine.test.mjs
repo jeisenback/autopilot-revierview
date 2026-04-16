@@ -377,3 +377,89 @@ test('sendAllDigests: one member failure does not stop others', async () => {
   await assert.doesNotReject(() => engine.sendAllDigests('2026-04-12'));
   assert.equal(callCount, 2, 'should attempt both members even after one fails');
 });
+
+// ─── spaces in digest (issue #39) ─────────────────────────────────────────────
+
+import { createSpaceManager } from '../orchestrator/spaceManager.mjs';
+
+function seedSpace(db, { name = 'Mudroom', readyState = 'hooks clear', isReady = 0, assignedTo = null } = {}) {
+  return db.prepare(
+    `INSERT INTO spaces (name, ready_state, is_ready, assigned_to) VALUES (?, ?, ?, ?)`
+  ).run(name, readyState, isReady, assignedTo).lastInsertRowid;
+}
+
+test('buildDigest: notReadySpaces includes spaces assigned to member', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-space-1' });
+  seedSpace(db, { name: 'Mudroom', isReady: 0, assignedTo: alice.id });
+  seedSpace(db, { name: 'Kitchen', isReady: 1, assignedTo: alice.id });  // ready, should be excluded
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.equal(digest.notReadySpaces.length, 1);
+  assert.equal(digest.notReadySpaces[0].name, 'Mudroom');
+});
+
+test('buildDigest: adult sees unassigned not-ready spaces too', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-space-2' });  // adult
+  seedSpace(db, { name: 'Shared Counter', isReady: 0, assignedTo: null });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.equal(digest.notReadySpaces.length, 1);
+  assert.equal(digest.notReadySpaces[0].name, 'Shared Counter');
+});
+
+test('buildDigest: kid does NOT see unassigned spaces', () => {
+  const db = makeDb();
+  const kid = seedMember(db, { name: 'Jordan', discordId: 'u-space-3', role: 'kid' });
+  seedSpace(db, { name: 'Shared Counter', isReady: 0, assignedTo: null });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(kid.id, '2026-04-12');
+
+  assert.equal(digest.notReadySpaces.length, 0);
+});
+
+test('buildDigest: no not-ready spaces → notReadySpaces empty', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-space-4' });
+  seedSpace(db, { name: 'Mudroom', isReady: 1, assignedTo: alice.id });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.equal(digest.notReadySpaces.length, 0);
+});
+
+test('buildDigest: formatted includes spaces section when spaces not ready', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-space-5' });
+  seedSpace(db, { name: 'Mudroom', readyState: 'hooks clear', isReady: 0, assignedTo: alice.id });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.ok(digest.formatted.includes('Spaces'), 'formatted should include spaces section header');
+  assert.ok(digest.formatted.includes('Mudroom'), 'formatted should include space name');
+});
+
+test('buildDigest: formatted omits spaces section when all ready', () => {
+  const db = makeDb();
+  const alice = seedMember(db, { discordId: 'u-space-6' });
+  seedSpace(db, { name: 'Mudroom', isReady: 1, assignedTo: alice.id });
+
+  const sm = createSpaceManager({ db });
+  const engine = createBriefingEngine({ db, callClaude: stubClaude(), getStates: stubGetStates(), postMessage: async () => {}, spaceManager: sm });
+  const digest = engine.buildDigest(alice.id, '2026-04-12');
+
+  assert.ok(!digest.formatted.includes('Spaces needing'), 'should not include spaces section when all ready');
+});
